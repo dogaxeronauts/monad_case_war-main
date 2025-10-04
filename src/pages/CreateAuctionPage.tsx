@@ -49,6 +49,10 @@ export function CreateAuctionPage() {
     setDeploymentResult(null);
 
     try {
+      // Get player address from wallet or use default
+      const playerAddress = authenticated ? await monadDeployer.getWalletAddress() : null;
+      const treasuryAddress = import.meta.env.VITE_TREASURY_CONTRACT_ADDRESS || "0x1111111111111111111111111111111111111111";
+
       // Monad testnet'e contract deploy et
       const result = await monadDeployer.createVault({
         title: title.trim(),
@@ -58,7 +62,9 @@ export function CreateAuctionPage() {
           rarity: item.rarity
         })),
         minPrice,
-        duration
+        duration,
+        treasuryAddress,
+        playerAddress: playerAddress || undefined
       });
 
       setDeploymentResult(result);
@@ -67,6 +73,16 @@ export function CreateAuctionPage() {
         // Demo amaçlı normal auction oluşturmaya devam et
         const cover = selectedItems[0]?.image || MOCK_NFTS[0].image;
         const auctionId = createAuction(selectedItems, minPrice, duration, title, cover);
+        
+        // Log auction creation with blockchain details
+        console.log('Auction created with blockchain integration:', {
+          localAuctionId: auctionId,
+          blockchainAuctionId: result.auctionId,
+          vaultId: result.vaultId,
+          transactionHash: result.transactionHash,
+          treasuryAddress,
+          playerAddress: playerAddress || 'demo-mode'
+        });
         
         // Başarı bildirimi göster
         setTimeout(() => {

@@ -469,7 +469,7 @@ export class AutoAuctionManager {
    */
   private initializeGameWallet(): void {
     try {
-      const privateKey = process.env.VITE_GAME_WALLET_PRIVATE_KEY;
+      const privateKey = process.env.GAME_WALLET_PRIVATE_KEY;
       
       if (!privateKey) {
         console.warn('Game wallet private key not found in environment variables');

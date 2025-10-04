@@ -3,7 +3,7 @@ import { autoAuctionManager } from './autoAuctionManager';
 
 // Monad Testnet Configuration
 const MONAD_TESTNET_CONFIG = {
-  chainId: 84532, // Monad testnet chain ID
+  chainId: 10143, // Monad testnet chain ID
   name: 'Monad Testnet',
   rpcUrl: 'https://rpc.testnet.monad.xyz', // Monad testnet RPC
   blockExplorerUrl: 'https://explorer.testnet.monad.xyz',

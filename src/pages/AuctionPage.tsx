@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Crown, Zap, Users, TrendingUp } from "lucide-react";
+import { Crown, Zap, Users, TrendingUp, Settings, Wallet } from "lucide-react";
 import { useStore } from "../lib/store";
 import { useTranslation } from "../lib/i18n";
+import { useAutoBid } from "../lib/useAutoBid";
 import { LivePriceTicker } from "../components/LivePriceTicker";
 import { PlusOneRain } from "../components/PlusOneRain";
 import { OutbidBanner } from "../components/OutbidBanner";
@@ -16,6 +17,17 @@ export function AuctionPage() {
   const navigate = useNavigate();
   const { auctions, bids, currentUser, placeBid, finalizeAuction, settings, updateUiFlag, uiFlags, addWonAuction } = useStore();
   const t = useTranslation(settings.language);
+  
+  // Auto bid hook
+  const { 
+    isAutoBidding, 
+    autoBidConfig, 
+    setAutoBidConfig, 
+    placeBid: placeAutoBid, 
+    getGameWalletBalance,
+    error: autoBidError,
+    clearError 
+  } = useAutoBid();
 
   const auction = auctions.find((a) => a.id === id);
   const auctionBids = bids.filter((b) => b.auctionId === id);
@@ -27,6 +39,8 @@ export function AuctionPage() {
 
   const [autoBid, setAutoBid] = useState(false);
   const [showItems, setShowItems] = useState(false);
+  const [showAutoBidConfig, setShowAutoBidConfig] = useState(false);
+  const [gameWalletBalance, setGameWalletBalance] = useState('0');
   const simulationRef = useRef<CompetitorSimulation | null>(null);
   const autoBidIntervalRef = useRef<number>();
 
@@ -36,6 +50,27 @@ export function AuctionPage() {
   useEffect(() => {
     updateUiFlag(id || "", { highBidRate: isHighBidRate });
   }, [isHighBidRate, id, updateUiFlag]);
+
+  // Load game wallet balance
+  useEffect(() => {
+    const loadGameWalletBalance = async () => {
+      try {
+        const balance = await getGameWalletBalance();
+        setGameWalletBalance(balance);
+      } catch (error) {
+        console.error('Failed to load game wallet balance:', error);
+      }
+    };
+
+    loadGameWalletBalance();
+    const interval = setInterval(loadGameWalletBalance, 30000); // Update every 30 seconds
+    return () => clearInterval(interval);
+  }, [getGameWalletBalance]);
+
+  // Clear auto bid errors when component unmounts
+  useEffect(() => {
+    return () => clearError();
+  }, [clearError]);
 
   useEffect(() => {
     if (!auction) return;
@@ -52,10 +87,40 @@ export function AuctionPage() {
     };
   }, [auction?.id]);
 
+  const handleBid = useCallback(async () => {
+    if (!auction || auction.status !== "live") return;
+
+    // Use automatic bidding if enabled
+    if (autoBidConfig.enabled && id) {
+      try {
+        const success = await placeAutoBid(id);
+        if (success) {
+          // Update local state to reflect the bid
+          placeBid(auction.id, "you");
+          
+          if (settings.hapticsEnabled && navigator.vibrate) {
+            navigator.vibrate(15);
+          }
+        } else if (autoBidError) {
+          console.error('Auto bid failed:', autoBidError);
+        }
+      } catch (error) {
+        console.error('Auto bid error:', error);
+      }
+    } else {
+      // Use traditional bidding system
+      placeBid(auction.id, "you");
+
+      if (settings.hapticsEnabled && navigator.vibrate) {
+        navigator.vibrate(15);
+      }
+    }
+  }, [auction, placeBid, settings.hapticsEnabled, autoBidConfig.enabled, id, placeAutoBid, autoBidError]);
+
   useEffect(() => {
     if (autoBid && auction?.status === "live") {
-      autoBidIntervalRef.current = window.setInterval(() => {
-        handleBid();
+      autoBidIntervalRef.current = window.setInterval(async () => {
+        await handleBid();
       }, 1000);
     } else {
       if (autoBidIntervalRef.current) {
@@ -68,16 +133,7 @@ export function AuctionPage() {
         clearInterval(autoBidIntervalRef.current);
       }
     };
-  }, [autoBid, auction?.status]);
-
-  const handleBid = useCallback(() => {
-    if (!auction || auction.status !== "live") return;
-    placeBid(auction.id, "you");
-
-    if (settings.hapticsEnabled && navigator.vibrate) {
-      navigator.vibrate(15);
-    }
-  }, [auction, placeBid, settings.hapticsEnabled]);
+  }, [autoBid, auction?.status, handleBid]);
 
   const handleAuctionEnd = useCallback(() => {
     if (!auction) return;
@@ -216,24 +272,113 @@ export function AuctionPage() {
                 )}
 
                 {auction.status === "live" ? (
-                  <div className="flex flex-col sm:flex-row gap-3">
-                    <button
-                      onClick={handleBid}
-                      className="flex-1 py-4 bg-monad-gradient hover:opacity-90 text-white font-bold text-xl rounded-xl transition flex items-center justify-center gap-2"
-                    >
-                      <Zap className="w-6 h-6" />
-                      {t.auction.bidNow}
-                    </button>
-                    <button
-                      onClick={() => setAutoBid(!autoBid)}
-                      className={`px-6 py-4 border-2 rounded-xl font-semibold transition ${
-                        autoBid
-                          ? "bg-monad border-monad text-white"
-                          : "border-white/20 text-gray-300 hover:border-monad/50"
-                      }`}
-                    >
-                      {t.auction.autoBid}
-                    </button>
+                  <div className="space-y-3">
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <button
+                        onClick={handleBid}
+                        disabled={isAutoBidding}
+                        className={`flex-1 py-4 bg-monad-gradient hover:opacity-90 text-white font-bold text-xl rounded-xl transition flex items-center justify-center gap-2 ${
+                          isAutoBidding ? 'opacity-50 cursor-not-allowed' : ''
+                        }`}
+                      >
+                        <Zap className="w-6 h-6" />
+                        {isAutoBidding ? 'Teklif Veriliyor...' : t.auction.bidNow}
+                      </button>
+                      <button
+                        onClick={() => setAutoBid(!autoBid)}
+                        className={`px-6 py-4 border-2 rounded-xl font-semibold transition ${
+                          autoBid
+                            ? "bg-monad border-monad text-white"
+                            : "border-white/20 text-gray-300 hover:border-monad/50"
+                        }`}
+                      >
+                        {t.auction.autoBid}
+                      </button>
+                      <button
+                        onClick={() => setShowAutoBidConfig(!showAutoBidConfig)}
+                        className="px-4 py-4 border border-white/20 text-gray-300 hover:border-monad/50 rounded-xl transition"
+                      >
+                        <Settings className="w-6 h-6" />
+                      </button>
+                    </div>
+
+                    {/* Auto-bid Configuration Panel */}
+                    {showAutoBidConfig && (
+                      <div className="bg-gray-900/70 border border-white/10 rounded-lg p-4 space-y-4">
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-white font-semibold">Otomatik Teklif Ayarları</h4>
+                          <label className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={autoBidConfig.enabled}
+                              onChange={(e) => setAutoBidConfig({ enabled: e.target.checked })}
+                              className="rounded"
+                            />
+                            <span className="text-sm text-gray-300">Otomatik Teklif</span>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm text-gray-400 mb-1">Player Address</label>
+                            <input
+                              type="text"
+                              value={autoBidConfig.playerAddress}
+                              onChange={(e) => setAutoBidConfig({ playerAddress: e.target.value })}
+                              placeholder="0x..."
+                              className="w-full px-3 py-2 bg-gray-800 border border-white/10 rounded text-white text-sm"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm text-gray-400 mb-1">Treasury Address</label>
+                            <input
+                              type="text"
+                              value={autoBidConfig.treasuryAddress}
+                              onChange={(e) => setAutoBidConfig({ treasuryAddress: e.target.value })}
+                              placeholder="0x..."
+                              className="w-full px-3 py-2 bg-gray-800 border border-white/10 rounded text-white text-sm"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm text-gray-400 mb-1">Teklif Artışı (MON)</label>
+                            <input
+                              type="number"
+                              step="0.1"
+                              min="0.1"
+                              value={autoBidConfig.bidIncrement || 1}
+                              onChange={(e) => setAutoBidConfig({ bidIncrement: parseFloat(e.target.value) })}
+                              className="w-full px-3 py-2 bg-gray-800 border border-white/10 rounded text-white text-sm"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-sm text-gray-400 mb-1">Max Teklif (MON)</label>
+                            <input
+                              type="number"
+                              step="1"
+                              min="1"
+                              value={autoBidConfig.maxBidAmount || 100}
+                              onChange={(e) => setAutoBidConfig({ maxBidAmount: parseFloat(e.target.value) })}
+                              className="w-full px-3 py-2 bg-gray-800 border border-white/10 rounded text-white text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-2 border-t border-white/10">
+                          <div className="flex items-center gap-2 text-sm text-gray-400">
+                            <Wallet className="w-4 h-4" />
+                            Game Wallet: {gameWalletBalance} MON
+                          </div>
+                          {autoBidError && (
+                            <div className="text-red-400 text-sm">
+                              {autoBidError}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="text-center py-8">
