@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { Sparkles, Zap } from "lucide-react";
 import { useStore } from "../lib/store";
@@ -9,15 +9,15 @@ import { generateSeedAuctions } from "../data/seedAuctions";
 export function HomePage() {
   const { auctions, bids, settings } = useStore();
   const t = useTranslation(settings.language);
+  const seedsInitialized = useRef(false);
 
   useEffect(() => {
-    if (auctions.length === 0) {
+    if (auctions.length === 0 && !seedsInitialized.current) {
+      seedsInitialized.current = true;
       const seedAuctions = generateSeedAuctions();
-      seedAuctions.forEach((auction) => {
-        useStore.setState((state) => ({
-          auctions: [...state.auctions, auction],
-        }));
-      });
+      useStore.setState(() => ({
+        auctions: seedAuctions,
+      }));
     }
   }, [auctions.length]);
 

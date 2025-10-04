@@ -1,22 +1,32 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Check, Sparkles } from "lucide-react";
+import { Check, Sparkles, Loader2, ExternalLink, Wallet } from "lucide-react";
+import { usePrivy } from "@privy-io/react-auth";
 import { useStore } from "../lib/store";
 import { useTranslation } from "../lib/i18n";
 import { MOCK_NFTS } from "../data/mockNfts";
 import { RarityChip } from "../components/RarityChip";
 import { formatMon, calculateCaseSummary, calculateExactEV, calculateRarityBaselineEV } from "../lib/ev";
 import { NftItem } from "../types";
+import { monadDeployer } from "../lib/monadDeployer";
 
 export function CreateAuctionPage() {
   const navigate = useNavigate();
   const { createAuction, settings } = useStore();
+  const { authenticated, login } = usePrivy();
   const t = useTranslation(settings.language);
 
   const [selectedItems, setSelectedItems] = useState<NftItem[]>([]);
   const [minPrice, setMinPrice] = useState(50);
   const [duration, setDuration] = useState<5 | 15 | 30 | 60>(15);
   const [title, setTitle] = useState("");
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [deploymentResult, setDeploymentResult] = useState<{
+    success: boolean;
+    vaultId?: number;
+    transactionHash?: string;
+    error?: string;
+  } | null>(null);
 
   const toggleItem = (item: NftItem) => {
     if (selectedItems.find((i) => i.id === item.id)) {
@@ -26,12 +36,52 @@ export function CreateAuctionPage() {
     }
   };
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (selectedItems.length === 0 || !title.trim()) return;
 
-    const cover = selectedItems[0]?.image || MOCK_NFTS[0].image;
-    const auctionId = createAuction(selectedItems, minPrice, duration, title, cover);
-    navigate(`/auction/${auctionId}`);
+    // Wallet bağlantısını kontrol et
+    if (!authenticated) {
+      alert('Demo modunda çalışıyor. Gerçek deployment için wallet bağlayın.');
+      // Demo modunda devam et, wallet olmadan da çalışsın
+    }
+
+    setIsDeploying(true);
+    setDeploymentResult(null);
+
+    try {
+      // Monad testnet'e contract deploy et
+      const result = await monadDeployer.createVault({
+        title: title.trim(),
+        selectedNFTs: selectedItems.map(item => ({
+          id: item.id,
+          name: item.name,
+          rarity: item.rarity
+        })),
+        minPrice,
+        duration
+      });
+
+      setDeploymentResult(result);
+
+      if (result.success) {
+        // Demo amaçlı normal auction oluşturmaya devam et
+        const cover = selectedItems[0]?.image || MOCK_NFTS[0].image;
+        const auctionId = createAuction(selectedItems, minPrice, duration, title, cover);
+        
+        // Başarı bildirimi göster
+        setTimeout(() => {
+          navigate(`/auction/${auctionId}`);
+        }, 3000);
+      }
+    } catch (error) {
+      console.error('Contract deployment hatası:', error);
+      setDeploymentResult({
+        success: false,
+        error: 'Contract deployment başarısız oldu'
+      });
+    } finally {
+      setIsDeploying(false);
+    }
   };
 
   const summary = calculateCaseSummary(selectedItems);
@@ -161,14 +211,81 @@ export function CreateAuctionPage() {
                 </div>
               </div>
 
+              {/* Wallet Connection Info */}
+              {!authenticated && (
+                <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                  <div className="flex items-center gap-2 text-blue-400">
+                    <Wallet className="w-4 h-4" />
+                    <span className="text-sm font-medium">
+                      Demo modunda çalışıyor - Gerçek contract deployment için wallet bağlayın
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <button
                 onClick={handleCreate}
-                disabled={selectedItems.length === 0 || !title.trim()}
+                disabled={selectedItems.length === 0 || !title.trim() || isDeploying}
                 className="w-full py-4 bg-monad-gradient hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl transition flex items-center justify-center gap-2"
               >
-                <Sparkles className="w-5 h-5" />
-                {t.create.createButton}
+                {isDeploying ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    {authenticated ? 'Contract Deploy Ediliyor...' : 'Demo Kasa Oluşturuluyor...'}
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    {authenticated ? 'Monad\'da Kasa Oluştur' : 'Demo Kasa Oluştur'}
+                  </>
+                )}
               </button>
+
+              {/* Deployment Result */}
+              {deploymentResult && (
+                <div className={`mt-4 p-4 rounded-lg border ${
+                  deploymentResult.success 
+                    ? 'bg-green-500/10 border-green-500/30 text-green-400' 
+                    : 'bg-red-500/10 border-red-500/30 text-red-400'
+                }`}>
+                  {deploymentResult.success ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4" />
+                        <span className="font-semibold">
+                          {authenticated ? 'Kasa başarıyla deploy edildi!' : 'Demo kasa başarıyla oluşturuldu!'}
+                        </span>
+                      </div>
+                      {deploymentResult.vaultId && (
+                        <div className="text-sm">
+                          Vault ID: #{deploymentResult.vaultId}
+                        </div>
+                      )}
+                      {deploymentResult.transactionHash && (
+                        <div className="text-sm">
+                          <a 
+                            href={`https://explorer.testnet.monad.xyz/tx/${deploymentResult.transactionHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 hover:underline"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            {authenticated ? 'Transaction: ' : 'Mock TX: '}{deploymentResult.transactionHash.slice(0, 10)}...
+                          </a>
+                        </div>
+                      )}
+                      <div className="text-sm">
+                        Demo auction'a yönlendiriliyorsunuz...
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="font-semibold">Contract deployment başarısız</div>
+                      <div className="text-sm mt-1">{deploymentResult.error}</div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

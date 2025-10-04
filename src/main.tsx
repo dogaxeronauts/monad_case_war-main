@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { PrivyProvider } from '@privy-io/react-auth';
+import './polyfills'; // Import polyfills first
 import App from './App.tsx';
 import './index.css';
 
